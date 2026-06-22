@@ -25,4 +25,3 @@ notify-send \
     "Claude Code" \
     "Waiting for your input."
 
-echo "$(date): hook fired" >> /tmp/claude-notify.log
