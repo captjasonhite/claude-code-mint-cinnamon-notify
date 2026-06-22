@@ -1,0 +1,49 @@
+#!/bin/bash
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLAUDE_DIR="$HOME/.claude"
+SCRIPT_DEST="$CLAUDE_DIR/notify-stop.sh"
+SETTINGS="$CLAUDE_DIR/settings.json"
+
+mkdir -p "$CLAUDE_DIR"
+
+cp "$SCRIPT_DIR/notify-stop.sh" "$SCRIPT_DEST"
+chmod +x "$SCRIPT_DEST"
+
+python3 - "$SETTINGS" "$SCRIPT_DEST" <<'EOF'
+import sys, json, os
+
+settings_path = sys.argv[1]
+script_path = sys.argv[2]
+
+if os.path.exists(settings_path):
+    with open(settings_path) as f:
+        settings = json.load(f)
+else:
+    settings = {}
+
+hook_entry = {
+    "matcher": "",
+    "hooks": [{"type": "command", "command": script_path}]
+}
+
+settings.setdefault("hooks", {}).setdefault("Stop", [])
+
+# Remove duplicates before adding
+settings["hooks"]["Stop"] = [
+    h for h in settings["hooks"]["Stop"]
+    if not any(c.get("command") == script_path for c in h.get("hooks", []))
+]
+settings["hooks"]["Stop"].append(hook_entry)
+
+with open(settings_path, "w") as f:
+    json.dump(settings, f, indent=2)
+    f.write("\n")
+
+print(f"Hook registered in {settings_path}")
+EOF
+
+echo ""
+echo "Done. Restart Claude Code for the hook to take effect."
+echo "To verify: tail /tmp/claude-notify.log after your next Claude response."
