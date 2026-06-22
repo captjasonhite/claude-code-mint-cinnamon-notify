@@ -26,13 +26,7 @@ Then **restart Claude Code**. The hook takes effect on the next launch.
 
 ## Verify it's working
 
-After your next Claude response, check:
-
-```bash
-cat /tmp/claude-notify.log
-```
-
-You should see a timestamped line for each time the hook fired.
+After your next Claude response, a desktop notification should appear. If it doesn't, see Troubleshooting below.
 
 ## How it works
 
@@ -51,12 +45,12 @@ Remove the hook entry from `~/.claude/settings.json` and delete `~/.claude/notif
 
 ## Troubleshooting
 
-**No notification, but log file exists** — `notify-send` is failing. Test manually:
+**No notification** — `notify-send` may be failing silently. Test manually:
 ```bash
 DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus" \
   notify-send "test" "test"
 ```
 
-**Log file doesn't exist after a Claude response** — the hook isn't firing at all. Check that `~/.claude/settings.json` contains the `Stop` hook entry and that `~/.claude/notify-stop.sh` is executable (`chmod +x`).
+**Hook not firing at all** — check that `~/.claude/settings.json` contains the `Stop` hook entry and that `~/.claude/notify-stop.sh` is executable (`chmod +x`).
 
 **Settings got overwritten** — Claude Code can rewrite `settings.json` in some situations. Re-run `bash install.sh` to re-register the hook without affecting your other settings.
