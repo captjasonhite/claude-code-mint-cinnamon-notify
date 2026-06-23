@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+echo "$(date): hook fired" >> /tmp/claude-notify.log
+
 uid="$(id -u)"
 
 # Use the standard systemd user bus socket; fall back to scanning the DE process env
@@ -23,5 +25,6 @@ notify-send \
     --urgency=normal \
     -r 9999 \
     "Claude Code" \
-    "Waiting for your input."
+    "Waiting for your input." 2>> /tmp/claude-notify.log
+echo "notify-send exit: $?" >> /tmp/claude-notify.log
 

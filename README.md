@@ -54,3 +54,7 @@ DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus" \
 **Hook not firing at all** — check that `~/.claude/settings.json` contains the `Stop` hook entry and that `~/.claude/notify-stop.sh` is executable (`chmod +x`).
 
 **Settings got overwritten** — Claude Code can rewrite `settings.json` in some situations. Re-run `bash install.sh` to re-register the hook without affecting your other settings.
+
+**Hook duplicated in `settings.local.json`** — If you asked Claude to set up notifications, it may have added the hook to `~/.claude/settings.local.json` in addition to `settings.json`. The two can conflict and cause silent failures. Fix: open `~/.claude/settings.local.json` and remove the `hooks` block, leaving the hook only in `settings.json`. Then restart Claude Code.
+
+**Diagnosing silently broken notifications** — check `/tmp/claude-notify.log`. If entries appear there but no notification shows, `notify-send` is failing. If no entries appear at all, the hook isn't firing — check your `settings.json`. The log resets on reboot.
