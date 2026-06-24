@@ -26,7 +26,13 @@ Then **restart Claude Code**. The hook takes effect on the next launch.
 
 ## Verify it's working
 
-After your next Claude response, a desktop notification should appear. If it doesn't, see Troubleshooting below.
+After your next Claude response, a desktop notification should appear. If it doesn't, run the check script:
+
+```bash
+bash ~/.claude/notify-check.sh
+```
+
+This confirms the hook is registered in exactly one settings file and shows the recent log.
 
 ## How it works
 
@@ -37,7 +43,7 @@ Claude Code supports [Stop hooks](https://docs.anthropic.com/en/docs/claude-code
 
 The script explicitly sets the D-Bus session address because Claude Code's hook subprocess doesn't inherit the desktop session environment — without this, `notify-send` silently fails. It checks for the standard systemd user bus socket first (`/run/user/<uid>/bus`), and if that's missing, falls back to scanning the running desktop environment process for its D-Bus address.
 
-Notifications use `-r 9999` (replacement ID) so repeated responses replace the previous notification rather than stacking them.
+Each hook invocation uses its own process PID as the notification replacement ID, so notifications from concurrent Claude sessions don't stomp on each other.
 
 ## Uninstall
 
@@ -57,4 +63,4 @@ DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus" \
 
 **Hook duplicated in `settings.local.json`** — If you asked Claude to set up notifications, it may have added the hook to `~/.claude/settings.local.json` in addition to `settings.json`. The two can conflict and cause silent failures. Fix: open `~/.claude/settings.local.json` and remove the `hooks` block, leaving the hook only in `settings.json`. Then restart Claude Code.
 
-**Diagnosing silently broken notifications** — check `/tmp/claude-notify.log`. If entries appear there but no notification shows, `notify-send` is failing. If no entries appear at all, the hook isn't firing — check your `settings.json`. The log resets on reboot.
+**Diagnosing silently broken notifications** — run `bash ~/.claude/notify-check.sh`. It shows whether the hook is registered correctly and tails the recent log. Each log line is one event: if it appears, the hook ran; the `notify-send exit:` field tells you whether the desktop side succeeded. Exit 0 with no notification visible means the notification daemon is the problem, not the hook.

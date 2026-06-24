@@ -80,6 +80,26 @@ echo "notify-send exit: $?" >> /tmp/claude-notify.log
 
 ---
 
+---
+
+### 2026-06-24 — Multi-session stomping + hardening
+
+**Symptoms:** Second Claude Code session (same folder, started 5 min earlier) never notified. First session worked fine.
+
+**Diagnosed:**
+- Both sessions used `-r 9999`, so the second session to fire replaced the first session's notification
+- Hook was firing and `notify-send` exiting 0 in both sessions — confirmed via log
+- Silent because identical replacement ID made one session's notifications invisible
+
+**Changes made:**
+1. Replaced `-r 9999` with `-r "$$"` (bash PID of the hook subprocess) — each invocation gets a unique notification slot, concurrent sessions can't stomp each other
+2. Consolidated log to one line per event: `timestamp [pid]: hook fired | notify-send exit: N` with stderr inline if present
+3. Added `notify-check.sh` — scans all Claude settings files, confirms hook is registered in exactly one place, tails recent log; install script now deploys it to `~/.claude/notify-check.sh`
+
+**Resolved:** Both sessions notify independently.
+
+---
+
 ## What to include when reporting a failure
 
 1. Contents of `/tmp/claude-notify.log` — tells us if the hook is firing and if notify-send errors

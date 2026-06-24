@@ -4,12 +4,16 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="$HOME/.claude"
 SCRIPT_DEST="$CLAUDE_DIR/notify-stop.sh"
+CHECK_DEST="$CLAUDE_DIR/notify-check.sh"
 SETTINGS="$CLAUDE_DIR/settings.json"
 
 mkdir -p "$CLAUDE_DIR"
 
 cp "$SCRIPT_DIR/notify-stop.sh" "$SCRIPT_DEST"
 chmod +x "$SCRIPT_DEST"
+
+cp "$SCRIPT_DIR/notify-check.sh" "$CHECK_DEST"
+chmod +x "$CHECK_DEST"
 
 python3 - "$SETTINGS" "$SCRIPT_DEST" <<'EOF'
 import sys, json, os
@@ -46,4 +50,4 @@ EOF
 
 echo ""
 echo "Done. Restart Claude Code for the hook to take effect."
-echo "To verify: tail /tmp/claude-notify.log after your next Claude response."
+echo "To verify: bash $CHECK_DEST"
