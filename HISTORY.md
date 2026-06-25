@@ -100,8 +100,70 @@ echo "notify-send exit: $?" >> /tmp/claude-notify.log
 
 ---
 
+### 2026-06-24 (evening) — hook fires but notifications still don't appear
+
+**Symptoms:** Hook fires (log confirms it, `stop_hook_summary` present in JSONL for 2.1.191), notify-send exits 0, nothing visible on screen. Recurring pattern matching 2026-06-23.
+
+**Diagnosed:**
+- Hook IS firing — confirmed via `/tmp/claude-notify.log` and `stop_hook_summary` in session JSONL
+- `notify-send` exits 0 even when Cinnamon notification daemon is dead/unresponsive — this is a libnotify behavior, not a bug in the script
+- `gdbus call GetServerInformation` reliably fails when daemon is dead; `notify-send` does not report this
+- DND settings (`display-notifications`, `show-banners`) were both `true` at time of check
+- `--urgency=normal` can be suppressed by Cinnamon focus/applet state; `critical` bypasses this
+
+**Changes made to `~/.claude/notify-stop.sh`:**
+1. Added `gdbus call GetServerInformation` health check before sending — logs `DAEMON DEAD` explicitly when daemon is unresponsive; previously this silent failure looked identical to success
+2. Changed `--urgency=normal` → `--urgency=critical` — harder for Cinnamon to suppress silently
+3. Increased `--expire-time` 5000 → 8000 ms
+
+**Current `~/.claude/notify-stop.sh`:**
+```bash
+#!/usr/bin/env bash
+
+uid="$(id -u)"
+
+if [[ -S "/run/user/$uid/bus" ]]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus"
+else
+    for proc in cinnamon gnome-shell plasmashell xfce4-session mate-session; do
+        pid="$(pgrep -u "$uid" -x "$proc" | head -n1 || true)"
+        [[ -n "$pid" ]] || continue
+        dbus="$(tr '\0' '\n' < "/proc/$pid/environ" \
+            | grep '^DBUS_SESSION_BUS_ADDRESS=' \
+            | cut -d= -f2- || true)"
+        [[ -n "$dbus" ]] && export DBUS_SESSION_BUS_ADDRESS="$dbus" && break
+    done
+fi
+
+# Verify daemon is alive before sending — notify-send exits 0 even when daemon is dead
+if ! gdbus call --session \
+    --dest=org.freedesktop.Notifications \
+    --object-path=/org/freedesktop/Notifications \
+    --method=org.freedesktop.Notifications.GetServerInformation \
+    >/dev/null 2>&1; then
+    echo "$(date) [$$]: DAEMON DEAD | no notification sent" >> /tmp/claude-notify.log
+    exit 0
+fi
+
+notify_err="$(notify-send \
+    --app-name="Claude Code" \
+    --icon=dialog-information \
+    --expire-time=8000 \
+    --urgency=critical \
+    -r "$$" \
+    "Claude Code" \
+    "Waiting for your input." 2>&1)"
+notify_exit=$?
+
+echo "$(date) [$$]: hook fired | notify-send exit: ${notify_exit}${notify_err:+ | err: ${notify_err}}" >> /tmp/claude-notify.log
+```
+
+**Root cause still unresolved.** If `DAEMON DEAD` appears in log next time, that confirms Cinnamon's notification applet is crashing periodically. Recovery: right-click taskbar → Troubleshoot → Restart Cinnamon, or `killall -HUP cinnamon`.
+
+---
+
 ## What to include when reporting a failure
 
-1. Contents of `/tmp/claude-notify.log` — tells us if the hook is firing and if notify-send errors
+1. Contents of `/tmp/claude-notify.log` — tells us if hook fired, if daemon was dead, or if notify-send errored
 2. Whether notifications worked recently and when they stopped
 3. Whether you restarted Claude Code or rebooted between working and broken
