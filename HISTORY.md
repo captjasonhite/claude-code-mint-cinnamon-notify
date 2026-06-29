@@ -162,6 +162,64 @@ echo "$(date) [$$]: hook fired | notify-send exit: ${notify_exit}${notify_err:+ 
 
 ---
 
+### 2026-06-29 — Fix notification stacking + add audio bell
+
+**Symptoms:** Multiple notifications stacking up, each requiring individual dismissal. No audio alert.
+
+**Changes made to `~/.claude/notify-stop.sh`:**
+1. Changed `-r "$$"` → `-r "$PPID"` — uses the Claude Code parent process PID as the notification ID; same session replaces its own notification rather than stacking, while multiple sessions still get independent slots
+2. Added `paplay /usr/share/sounds/freedesktop/stereo/bell.oga` via PipeWire — plays audible bell on each stop event
+   - Terminal tty approach failed: Claude Code's Node.js process has `tty_nr=0` (no controlling terminal), so `/proc/$PPID/fd/1` is a pipe, not a tty
+   - `XDG_RUNTIME_DIR` must be set explicitly for paplay to find PipeWire socket
+
+**Current `~/.claude/notify-stop.sh`:**
+```bash
+#!/usr/bin/env bash
+
+uid="$(id -u)"
+
+if [[ -S "/run/user/$uid/bus" ]]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus"
+else
+    for proc in cinnamon gnome-shell plasmashell xfce4-session mate-session; do
+        pid="$(pgrep -u "$uid" -x "$proc" | head -n1 || true)"
+        [[ -n "$pid" ]] || continue
+        dbus="$(tr '\0' '\n' < "/proc/$pid/environ" \
+            | grep '^DBUS_SESSION_BUS_ADDRESS=' \
+            | cut -d= -f2- || true)"
+        [[ -n "$dbus" ]] && export DBUS_SESSION_BUS_ADDRESS="$dbus" && break
+    done
+fi
+
+# Verify daemon is alive before sending — notify-send exits 0 even when daemon is dead
+if ! gdbus call --session \
+    --dest=org.freedesktop.Notifications \
+    --object-path=/org/freedesktop/Notifications \
+    --method=org.freedesktop.Notifications.GetServerInformation \
+    >/dev/null 2>&1; then
+    echo "$(date) [$$]: DAEMON DEAD | no notification sent" >> /tmp/claude-notify.log
+    exit 0
+fi
+
+notify_err="$(notify-send \
+    --app-name="Claude Code" \
+    --icon=dialog-information \
+    --expire-time=8000 \
+    --urgency=critical \
+    -r "$PPID" \
+    "Claude Code" \
+    "Waiting for your input." 2>&1)"
+notify_exit=$?
+
+# Play a sound via PipeWire/PulseAudio
+export XDG_RUNTIME_DIR="/run/user/$uid"
+paplay /usr/share/sounds/freedesktop/stereo/bell.oga 2>/dev/null &
+
+echo "$(date) [$$]: hook fired | notify-send exit: ${notify_exit}${notify_err:+ | err: ${notify_err}}" >> /tmp/claude-notify.log
+```
+
+---
+
 ## What to include when reporting a failure
 
 1. Contents of `/tmp/claude-notify.log` — tells us if hook fired, if daemon was dead, or if notify-send errored
