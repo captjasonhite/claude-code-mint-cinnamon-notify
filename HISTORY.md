@@ -297,6 +297,28 @@ Jason asked for a design/reliability review of the whole notify setup, then to f
 
 **Verified:** fired the deployed hook twice in a row with the same fake `session_id`, 2 seconds apart — both invocations logged `notify-send exit: 0` and the `CloseNotification` call produced no errors. Visual on-screen confirmation (no more piled-up popups) still needs Jason to confirm from real usage.
 
+**This did not actually fix it** — see next entry. `CloseNotification` was called with the same fictional client-side hash as `-r`, which was never a real notification ID in the first place, so it was a no-op.
+
+---
+
+### 2026-07-01 (real root cause) — client-side hash was never a valid replace-id
+
+**Symptoms:** Stacking continued after the `CloseNotification` fix, and Jason then reported notifications "not working at all."
+
+**Root cause, confirmed by manually calling the D-Bus `Notify` method directly:** Cinnamon's notification daemon assigns its own small sequential integer ID to every notification (confirmed via manual testing: it returned 102, then 103, then 104...). It only honors a client-supplied `replaces_id` if that value matches an ID it **previously issued** — passing an arbitrary value it never issued (our `cksum`-based hash, e.g. `1121493864`) is not treated as invalid, it's just silently ignored and a brand-new notification is created with the daemon's own next sequential ID. This means:
+- The original `-r <hash>` replace scheme (2026-06-29) never once actually replaced anything — every Stop event created a genuinely new, independent notification. This is the real reason stacking never stopped despite multiple fix attempts.
+- The 2026-07-01 `CloseNotification "$notify_id"` fix (previous entry) was calling `CloseNotification` with that same fictional hash, which also never matched a real notification, so it was a no-op too.
+
+**Changes made to `notify-stop.sh`:**
+1. Removed the client-side `cksum` hash and the `CloseNotification` call entirely
+2. Added a small per-session state file under `/tmp/claude-notify-ids/<sanitized-session-id>` that stores the **real** notification ID returned by the daemon
+3. `notify-send` is now called with `-p` (print-id) to capture the daemon's actual assigned ID from stdout, and `-r "$prev_id"` using the ID read back from the state file (defaulting to `0` — "new notification" — if no state file exists yet)
+4. After each send, the freshly returned ID is written back to the state file, so the next Stop event for the same session passes the correct real ID
+
+**Verified:** manually confirmed via direct D-Bus `Notify` calls that replacing with a real existing ID (`-r 104`) returns that same ID back (proof the daemon treats it as a genuine in-place replace), while replacing with an arbitrary/nonexistent ID returns a new one (proof of the original bug). Then ran the corrected hook script twice in a row for the same fake session — both invocations logged the same real ID (`105`), confirming the state file round-trip works. Redeployed via `install.sh`.
+
+**Also flagged to Jason:** while testing, several manual test notifications were created directly via D-Bus outside the hook and all were accepted successfully by the daemon (ids 102–105). If Jason's "not working at all" report means none of those were visible either, that points to Cinnamon's Do Not Disturb/focus mode being active, separate from anything in this script — worth checking Cinnamon's notification settings.
+
 ---
 
 ## What to include when reporting a failure

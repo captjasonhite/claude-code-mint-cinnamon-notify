@@ -62,9 +62,22 @@ IFS='|' read -r session_id project elapsed <<< "$info"
 [[ -n "$elapsed" ]] || elapsed="?"
 current_time="$(date +"%-I:%M %p")"
 notify_body="${current_time} - ${project} - ${elapsed} - Idle"
-notify_id="$(( $(printf '%s' "$session_id" | cksum | cut -d' ' -f1) % 2147483647 ))"
 
 NOTIFY_LOG="/tmp/claude-notify.log"
+
+# Cinnamon's notification daemon only replaces a notification if replace-id
+# matches an ID *it* previously handed out (its own small sequential counter) —
+# a client-chosen hash essentially never matches that, so replace silently
+# never fired and every call stacked a new notification. Track the real
+# server-assigned ID per session instead, so we can pass the actual prior ID
+# back in on the next call.
+STATE_DIR="/tmp/claude-notify-ids"
+mkdir -p "$STATE_DIR"
+state_key="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_-' '_')"
+STATE_FILE="$STATE_DIR/$state_key"
+prev_id=0
+[[ -f "$STATE_FILE" ]] && prev_id="$(cat "$STATE_FILE" 2>/dev/null)"
+[[ "$prev_id" =~ ^[0-9]+$ ]] || prev_id=0
 
 # Rotate the log so it doesn't grow unbounded across a long uptime.
 if [[ -f "$NOTIFY_LOG" ]] && [[ $(wc -l < "$NOTIFY_LOG") -gt 5000 ]]; then
@@ -98,26 +111,27 @@ if ! timeout 5 gdbus call --session \
     exit 0
 fi
 
-# Actively close any previous notification for this session before sending a new
-# one. Critical-urgency notifications never auto-expire (that's why we use
-# critical — it bypasses DND), and Cinnamon's notification daemon does not
-# reliably honor notify-send's -r replace-id against an undismissed critical
-# notification, so without this, alerts from the same session pile up on screen.
-timeout 5 gdbus call --session \
-    --dest=org.freedesktop.Notifications \
-    --object-path=/org/freedesktop/Notifications \
-    --method=org.freedesktop.Notifications.CloseNotification \
-    "$notify_id" >/dev/null 2>&1 || true
-
-notify_err="$(timeout 5 notify-send \
+notify_stderr_file="$(mktemp)"
+notify_stdout="$(timeout 5 notify-send \
     --app-name="Claude Code" \
     --icon=dialog-information \
     --expire-time=8000 \
     --urgency=critical \
-    -r "$notify_id" \
+    -r "$prev_id" \
+    -p \
     "Claude Code" \
-    "$notify_body" 2>&1)"
+    "$notify_body" 2>"$notify_stderr_file")"
 notify_exit=$?
+notify_err="$(cat "$notify_stderr_file" 2>/dev/null)"
+rm -f "$notify_stderr_file"
+
+new_id="$(printf '%s' "$notify_stdout" | tr -d '[:space:]')"
+if [[ "$new_id" =~ ^[0-9]+$ ]]; then
+    echo "$new_id" > "$STATE_FILE"
+    notify_id="$new_id"
+else
+    notify_id="?"
+fi
 
 # Play a sound via PipeWire/PulseAudio. Backgrounded + disowned so it isn't
 # killed if the hook's process group is torn down as soon as this script exits.
