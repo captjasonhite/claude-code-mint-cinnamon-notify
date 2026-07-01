@@ -220,6 +220,24 @@ echo "$(date) [$$]: hook fired | notify-send exit: ${notify_exit}${notify_err:+ 
 
 ---
 
+### 2026-07-01 — Fix multi-notification stacking (root cause of "-r PPID" fix not working)
+
+**Symptoms:** Jason had to close 4-5 stacked notifications instead of one. The 2026-06-29 fix (`-r "$PPID"`) was supposed to make repeat Stop events in the same session replace each other, but it didn't actually work.
+
+**Root cause:** `$PPID` inside the hook script is the immediate parent shell that Claude Code spawns to run the hook command. That parent process is re-created on every hook invocation, so its PID is *not* stable across Stop events within the same session — `-r "$PPID"` behaved almost like a random ID every time, so notifications kept stacking instead of replacing. Confirmed via `claude-code-guide` subagent + docs (https://code.claude.com/docs/en/hooks.md): Claude Code passes a JSON payload on **stdin** to hooks that includes a `session_id` field, which *is* stable for the lifetime of one session and differs across concurrent sessions.
+
+**Changes made to `~/.claude/notify-stop.sh`:**
+1. Read stdin JSON (`hook_input="$(cat)"`), extract `session_id` via a small inline Python snippet (falls back to `$PPID` if parsing fails/empty)
+2. Hash `session_id` with `cksum`, mod `2147483647` (notify-send's `-r` rejects values above `INT32_MAX` — hit this immediately in testing: `Integer value "…" for -r out of range`) to get a stable per-session notification ID
+3. Use that hashed ID for `-r` instead of `$PPID`
+4. Log now includes `session=<id> id=<hash>` for future debugging
+
+**Verified:** two calls with the same fake `session_id` on stdin produced the same hashed id and replaced each other; a different `session_id` produced a different id and notified independently.
+
+**Note:** if Jason runs multiple concurrent Claude Code sessions, each session still gets its own notification (by design) — that's not stacking, that's one active session = one active notification.
+
+---
+
 ## What to include when reporting a failure
 
 1. Contents of `/tmp/claude-notify.log` — tells us if hook fired, if daemon was dead, or if notify-send errored

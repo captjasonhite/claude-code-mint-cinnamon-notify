@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 
+hook_input="$(cat)"
+session_id="$(printf '%s' "$hook_input" | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("session_id",""))
+except Exception:
+    print("")' 2>/dev/null)"
+[[ -n "$session_id" ]] || session_id="$PPID"
+notify_id="$(( $(printf '%s' "$session_id" | cksum | cut -d' ' -f1) % 2147483647 ))"
+
 uid="$(id -u)"
 
 if [[ -S "/run/user/$uid/bus" ]]; then
@@ -30,9 +39,13 @@ notify_err="$(notify-send \
     --icon=dialog-information \
     --expire-time=8000 \
     --urgency=critical \
-    -r "$$" \
+    -r "$notify_id" \
     "Claude Code" \
     "Waiting for your input." 2>&1)"
 notify_exit=$?
 
-echo "$(date) [$$]: hook fired | notify-send exit: ${notify_exit}${notify_err:+ | err: ${notify_err}}" >> /tmp/claude-notify.log
+# Play a sound via PipeWire/PulseAudio
+export XDG_RUNTIME_DIR="/run/user/$uid"
+paplay /usr/share/sounds/freedesktop/stereo/bell.oga 2>/dev/null &
+
+echo "$(date) [$$]: hook fired | session=${session_id} id=${notify_id} | notify-send exit: ${notify_exit}${notify_err:+ | err: ${notify_err}}" >> /tmp/claude-notify.log
