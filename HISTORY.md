@@ -264,6 +264,27 @@ e.g. `1:43 PM - Apps - 1m24s - Idle`.
 
 ---
 
+### 2026-07-01 (review pass) — reliability hardening after code review
+
+Jason asked for a design/reliability review of the whole notify setup, then to fix everything found.
+
+**Changes made to `notify-stop.sh`:**
+1. Wrapped both `gdbus call GetServerInformation` and `notify-send` in `timeout 5` — previously a wedged (not dead) session bus could hang either call indefinitely, blocking the Stop hook (and Claude Code) instead of failing fast
+2. Elapsed-time lookup now falls back to a much wider `tail` (200000 lines) if the last real user prompt isn't found in the first 2000 — tool-heavy sessions could push the last prompt outside the original small window, silently showing `?`
+3. `paplay` is now also `disown`ed (in addition to backgrounding with `&`) and wrapped in `timeout 5`, so it can't be killed early if the hook's process group is torn down right after the script exits, and can't hang the script
+4. Added log rotation: `/tmp/claude-notify.log` is truncated to the last 1000 lines once it exceeds 5000, so it doesn't grow unbounded across long uptimes
+
+**Changes made to `install.sh`:**
+1. Before overwriting `~/.claude/notify-stop.sh` or `notify-check.sh`, diffs the deployed copy against the repo copy — if they differ (e.g. a hand-edited hotfix that never made it back into the repo), backs it up to `<file>.bak.<timestamp>` instead of silently clobbering it
+2. Backs up `~/.claude/settings.json` to `settings.json.bak.<timestamp>` before rewriting it
+
+**Changes made to `notify-check.sh`:**
+1. Added a "deployed vs repo drift" check comparing `~/Apps/claude-desktop-notify/notify-stop.sh` against `~/.claude/notify-stop.sh`, so drift is visible without having to diff manually
+
+**Verified:** ran `notify-stop.sh` with a synthetic stdin payload (fake `session_id`, transcript with a timestamped user entry) — logged correctly with exit 0. Ran `install.sh`, confirmed it detected the then-current deployed copies differed from the just-updated repo copies and backed them up before overwriting. Ran `notify-check.sh` after — hook registered once, deployed script now matches repo, log intact.
+
+---
+
 ## What to include when reporting a failure
 
 1. Contents of `/tmp/claude-notify.log` — tells us if hook fired, if daemon was dead, or if notify-send errored

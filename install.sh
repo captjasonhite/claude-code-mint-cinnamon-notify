@@ -9,11 +9,27 @@ SETTINGS="$CLAUDE_DIR/settings.json"
 
 mkdir -p "$CLAUDE_DIR"
 
+# If the deployed script was hand-edited (a hotfix that never made it back into
+# the repo), back it up instead of silently clobbering it.
+for pair in "$SCRIPT_DIR/notify-stop.sh:$SCRIPT_DEST" "$SCRIPT_DIR/notify-check.sh:$CHECK_DEST"; do
+    src="${pair%%:*}"
+    dest="${pair##*:}"
+    if [[ -f "$dest" ]] && ! diff -q "$src" "$dest" >/dev/null 2>&1; then
+        backup="$dest.bak.$(date +%Y%m%d%H%M%S)"
+        cp "$dest" "$backup"
+        echo "NOTE: $dest differed from repo copy — backed up to $backup"
+    fi
+done
+
 cp "$SCRIPT_DIR/notify-stop.sh" "$SCRIPT_DEST"
 chmod +x "$SCRIPT_DEST"
 
 cp "$SCRIPT_DIR/notify-check.sh" "$CHECK_DEST"
 chmod +x "$CHECK_DEST"
+
+if [[ -f "$SETTINGS" ]]; then
+    cp "$SETTINGS" "$SETTINGS.bak.$(date +%Y%m%d%H%M%S)"
+fi
 
 python3 - "$SETTINGS" "$SCRIPT_DEST" <<'EOF'
 import sys, json, os

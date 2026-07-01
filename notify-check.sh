@@ -28,6 +28,21 @@ else
 fi
 
 echo ""
+echo "=== deployed vs repo drift check ==="
+REPO_SCRIPT="$HOME/Apps/claude-desktop-notify/notify-stop.sh"
+DEPLOYED_SCRIPT="$HOME/.claude/notify-stop.sh"
+if [[ -f "$REPO_SCRIPT" && -f "$DEPLOYED_SCRIPT" ]]; then
+    if diff -q "$REPO_SCRIPT" "$DEPLOYED_SCRIPT" >/dev/null 2>&1; then
+        echo "OK:   deployed script matches repo copy"
+    else
+        echo "WARN: deployed script differs from repo copy at $REPO_SCRIPT"
+        echo "      re-run install.sh to sync, or copy manual hotfixes back into the repo"
+    fi
+else
+    echo "SKIP: repo copy not found at $REPO_SCRIPT"
+fi
+
+echo ""
 echo "=== recent log (last 10 events) ==="
 if [[ -f /tmp/claude-notify.log ]]; then
     tail -n 10 /tmp/claude-notify.log
