@@ -98,6 +98,17 @@ if ! timeout 5 gdbus call --session \
     exit 0
 fi
 
+# Actively close any previous notification for this session before sending a new
+# one. Critical-urgency notifications never auto-expire (that's why we use
+# critical — it bypasses DND), and Cinnamon's notification daemon does not
+# reliably honor notify-send's -r replace-id against an undismissed critical
+# notification, so without this, alerts from the same session pile up on screen.
+timeout 5 gdbus call --session \
+    --dest=org.freedesktop.Notifications \
+    --object-path=/org/freedesktop/Notifications \
+    --method=org.freedesktop.Notifications.CloseNotification \
+    "$notify_id" >/dev/null 2>&1 || true
+
 notify_err="$(timeout 5 notify-send \
     --app-name="Claude Code" \
     --icon=dialog-information \

@@ -285,6 +285,20 @@ Jason asked for a design/reliability review of the whole notify setup, then to f
 
 ---
 
+### 2026-07-01 (later still) — same-session notifications still stacking
+
+**Symptoms:** Jason closed 3 separate notification popups from the same Claude Code window in a row — confirmed this is a single session repeatedly popping new alerts rather than replacing its own, not multiple concurrent sessions (log confirms same `session_id`/`id` reused correctly each time).
+
+**Root cause:** `--urgency=critical` notifications are spec'd to never auto-expire (that was the intentional 2026-06-24 fix for DND bypass), and Cinnamon's built-in notification daemon does not reliably honor notify-send's `-r`/replace-id semantics against an already-displayed, undismissed critical notification — so instead of replacing in place, it just adds a new one next to the old one, which never goes away on its own.
+
+**Changes made to `notify-stop.sh`:**
+1. Before calling `notify-send`, explicitly call `org.freedesktop.Notifications.CloseNotification` over D-Bus with the session's hashed `notify_id` — actively removes any still-visible previous notification for this session instead of relying only on implicit replace-by-id
+2. Call is best-effort (`|| true`, wrapped in `timeout 5`) since there may be nothing to close on a session's first-ever notification
+
+**Verified:** fired the deployed hook twice in a row with the same fake `session_id`, 2 seconds apart — both invocations logged `notify-send exit: 0` and the `CloseNotification` call produced no errors. Visual on-screen confirmation (no more piled-up popups) still needs Jason to confirm from real usage.
+
+---
+
 ## What to include when reporting a failure
 
 1. Contents of `/tmp/claude-notify.log` — tells us if hook fired, if daemon was dead, or if notify-send errored
