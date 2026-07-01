@@ -1,12 +1,58 @@
 #!/usr/bin/env bash
 
 hook_input="$(cat)"
-session_id="$(printf '%s' "$hook_input" | python3 -c 'import json,sys
+info="$(printf '%s' "$hook_input" | python3 -c '
+import json, sys, os, datetime
+
 try:
-    print(json.load(sys.stdin).get("session_id",""))
+    data = json.load(sys.stdin)
 except Exception:
-    print("")' 2>/dev/null)"
+    data = {}
+
+session_id = data.get("session_id", "")
+cwd = data.get("cwd", "") or os.getcwd()
+transcript_path = data.get("transcript_path", "")
+project = os.path.basename(cwd.rstrip("/")) or cwd
+
+elapsed = "?"
+try:
+    import subprocess
+    tail = subprocess.run(["tail", "-n", "2000", transcript_path],
+                           capture_output=True, text=True, timeout=5).stdout
+    last_ts = None
+    for line in tail.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        if entry.get("type") == "user":
+            content = (entry.get("message") or {}).get("content")
+            if isinstance(content, str):
+                ts = entry.get("timestamp")
+                if ts:
+                    last_ts = ts
+    if last_ts:
+        then = datetime.datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+        now = datetime.datetime.now(datetime.timezone.utc)
+        secs = max(int((now - then).total_seconds()), 0)
+        h, rem = divmod(secs, 3600)
+        m, s = divmod(rem, 60)
+        elapsed = f"{h}h{m:02d}m" if h else (f"{m}m{s:02d}s" if m else f"{s}s")
+except Exception:
+    pass
+
+print(f"{session_id}|{project}|{elapsed}")
+' 2>/dev/null)"
+
+IFS='|' read -r session_id project elapsed <<< "$info"
 [[ -n "$session_id" ]] || session_id="$PPID"
+[[ -n "$project" ]] || project="?"
+[[ -n "$elapsed" ]] || elapsed="?"
+current_time="$(date +"%-I:%M %p")"
+notify_body="${current_time} - ${project} - ${elapsed} - Idle"
 notify_id="$(( $(printf '%s' "$session_id" | cksum | cut -d' ' -f1) % 2147483647 ))"
 
 uid="$(id -u)"
@@ -41,7 +87,7 @@ notify_err="$(notify-send \
     --urgency=critical \
     -r "$notify_id" \
     "Claude Code" \
-    "Waiting for your input." 2>&1)"
+    "$notify_body" 2>&1)"
 notify_exit=$?
 
 # Play a sound via PipeWire/PulseAudio

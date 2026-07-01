@@ -238,6 +238,32 @@ echo "$(date) [$$]: hook fired | notify-send exit: ${notify_exit}${notify_err:+ 
 
 ---
 
+### 2026-07-01 (later) — Richer notification body: project, time, elapsed
+
+**Request:** Jason wanted the notification body changed from generic "Waiting for your input." to `Ready for input - <project name> - <current time> - <elapsed time of last prompt>`.
+
+**Changes made to `~/.claude/notify-stop.sh`:**
+1. Extract `cwd` from the hook's stdin JSON, derive `project` as `basename(cwd)`
+2. Compute elapsed time: `tail -n 2000` the session's `transcript_path` (also from stdin JSON), find the last JSONL entry with `type == "user"` and a plain-string `message.content` (this excludes tool_result entries, which are also `type: "user"` in the transcript but have list content) — that's the last real user prompt. Diff its `timestamp` against now, format as `Xs` / `XmYYs` / `XhYYm`
+3. Built `notify_body="Ready for input - ${project} - ${current_time} - ${elapsed}"`, current_time via `date +"%-I:%M %p"`
+4. `tail -n 2000` (not reading the whole transcript) keeps this fast even on long sessions — the last real prompt is always near the end since the hook fires right after processing it
+
+**Verified:** ran the script with a real session's `transcript_path`, confirmed it correctly found the last prompt timestamp and computed ~84s elapsed, and correctly derived project name from `cwd`.
+
+---
+
+### 2026-07-01 (final) — Reorder body, drop "Ready for input" prefix
+
+Jason asked for field order `<current time> - <project name> - <elapsed time> - Idle` instead. `notify_body` is now:
+
+```bash
+notify_body="${current_time} - ${project} - ${elapsed} - Idle"
+```
+
+e.g. `1:43 PM - Apps - 1m24s - Idle`.
+
+---
+
 ## What to include when reporting a failure
 
 1. Contents of `/tmp/claude-notify.log` — tells us if hook fired, if daemon was dead, or if notify-send errored
